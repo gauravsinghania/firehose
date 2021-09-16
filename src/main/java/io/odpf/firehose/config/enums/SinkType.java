@@ -9,5 +9,7 @@ public enum SinkType {
     ELASTICSEARCH,
     REDIS,
     GRPC,
-    PROMETHEUS;
+    PROMETHEUS,
+    OBJECTSTORAGE,
+    BIGQUERY,
 }
