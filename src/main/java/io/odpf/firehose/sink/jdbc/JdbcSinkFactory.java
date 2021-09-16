@@ -1,23 +1,25 @@
 package io.odpf.firehose.sink.jdbc;
 
 
-import com.gojek.de.stencil.client.StencilClient;
-import com.gojek.de.stencil.parser.ProtoParser;
+
+
 import io.odpf.firehose.config.JdbcSinkConfig;
 import io.odpf.firehose.sink.AbstractSink;
 import io.odpf.firehose.sink.SinkFactory;
 import io.odpf.firehose.metrics.Instrumentation;
 import io.odpf.firehose.metrics.StatsDReporter;
 import io.odpf.firehose.proto.ProtoToFieldMapper;
+import com.gojek.de.stencil.client.StencilClient;
+import com.gojek.de.stencil.parser.ProtoParser;
 import org.aeonbits.owner.ConfigFactory;
 
 import java.util.Map;
 
 /**
- * Factory class to create the JDBCSink.
+ * Factory class to create the JDBC Sink.
  * <p>
  * The consumer framework would reflectively instantiate this factory
- * using the configurations supplied and invoke {@see #create(Map < String, String > configuration, StatsDClient client)}
+ * using the configurations supplied and invoke {@see #create(Map <String, String> configuration, StatsDReporter statsDReporter, StencilClient client)}
  * to obtain the JDBCSink sink implementation.
  */
 public class JdbcSinkFactory implements SinkFactory {
@@ -35,10 +37,8 @@ public class JdbcSinkFactory implements SinkFactory {
 
         Instrumentation instrumentation = new Instrumentation(statsDReporter, JdbcSinkFactory.class);
         String dbConfig = String.format(""
-                        + "\n\tJDBC URL: %s\n\tJDBC Username: %s\n\tJDBC Tablename: %s\n\tMax connection pool size: %s\n\tConnection timeout: %s"
-                        + "\n\tIdle timeout: %s\n\tMinimum idle: %s\n\tUnique keys: %s",
-                jdbcSinkConfig.getSinkJdbcUrl(), jdbcSinkConfig.getSinkJdbcUsername(), jdbcSinkConfig.getSinkJdbcTableName(), jdbcSinkConfig.getSinkJdbcConnectionPoolMaxSize(),
-                jdbcSinkConfig.getSinkJdbcConnectionPoolTimeoutMs(), jdbcSinkConfig.getSinkJdbcConnectionPoolIdleTimeoutMs(), jdbcSinkConfig.getSinkJdbcConnectionPoolMinIdle(), jdbcSinkConfig.getSinkJdbcUniqueKeys());
+                        + "\n\tJDBC URL: %s\n\tJDBC Username: %s\n\tJDBC Tablename: %s\n\tUnique keys: %s",
+                jdbcSinkConfig.getSinkJdbcUrl(), jdbcSinkConfig.getSinkJdbcUsername(), jdbcSinkConfig.getSinkJdbcTableName(), jdbcSinkConfig.getSinkJdbcUniqueKeys());
         instrumentation.logDebug(dbConfig);
         JdbcConnectionPool connectionPool = new HikariJdbcConnectionPool(jdbcSinkConfig.getSinkJdbcUrl(), jdbcSinkConfig.getSinkJdbcUsername(),
                 jdbcSinkConfig.getSinkJdbcPassword(), jdbcSinkConfig.getSinkJdbcConnectionPoolMaxSize(),
@@ -48,7 +48,6 @@ public class JdbcSinkFactory implements SinkFactory {
 
         return new JdbcSink(new Instrumentation(statsDReporter, JdbcSink.class), "db", connectionPool, queryTemplate, client);
     }
-
 
     private QueryTemplate createQueryTemplate(JdbcSinkConfig jdbcSinkConfig, StencilClient stencilClient) {
         ProtoParser protoParser = new ProtoParser(stencilClient, jdbcSinkConfig.getInputSchemaProtoClass());

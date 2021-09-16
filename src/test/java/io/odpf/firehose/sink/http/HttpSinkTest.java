@@ -1,12 +1,13 @@
 package io.odpf.firehose.sink.http;
 
-import com.gojek.de.stencil.client.StencilClient;
+
 import io.odpf.firehose.config.converter.RangeToHashMapConverter;
 import io.odpf.firehose.consumer.Message;
 import io.odpf.firehose.exception.DeserializerException;
 import io.odpf.firehose.exception.NeedToRetry;
 import io.odpf.firehose.metrics.Instrumentation;
 import io.odpf.firehose.sink.http.request.types.Request;
+import com.gojek.de.stencil.client.StencilClient;
 import org.apache.http.Header;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -188,7 +189,6 @@ public class HttpSinkTest {
         when(httpClient.execute(httpPut)).thenReturn(response);
         when(response.getAllHeaders()).thenReturn(new Header[]{new BasicHeader("Accept", "text/plain")});
         when(response.getEntity()).thenReturn(httpEntity);
-        when(httpEntity.getContent()).thenReturn(new StringInputStream("[{\"key\":\"value1\"},{\"key\":\"value2\"}]"));
 
         HttpSink httpSink = new HttpSink(instrumentation, request, httpClient, stencilClient,
                 retryStatusCodeRange, new RangeToHashMapConverter().convert(null, "400-505"));
@@ -406,5 +406,27 @@ public class HttpSinkTest {
         httpSink.execute();
 
         verify(instrumentation, times(1)).captureCountWithTags("firehose_sink_http_response_code_total", 1, "status_code=" + statusLine.getStatusCode(), "url=" + uri.getPath());
+    }
+
+    @Test
+    public void shouldLogResponseBodyWhenDebugIsEnabledAndNonNullResponse() throws Exception {
+        when(response.getStatusLine()).thenReturn(statusLine);
+        when(statusLine.getStatusCode()).thenReturn(200);
+
+        List<HttpEntityEnclosingRequestBase> httpRequests = Collections.singletonList(httpPut);
+
+        when(httpPut.getMethod()).thenReturn("PUT");
+        when(httpPut.getURI()).thenReturn(new URI("http://dummy.com"));
+        when(httpClient.execute(httpPut)).thenReturn(response);
+        when(response.getEntity()).thenReturn(httpEntity);
+        when(httpEntity.getContent()).thenReturn(new StringInputStream("[{\"key\":\"value1\"},{\"key\":\"value2\"}]"));
+        when(request.build(messages)).thenReturn(httpRequests);
+        when(instrumentation.isDebugEnabled()).thenReturn(true);
+
+        HttpSink httpSink = new HttpSink(instrumentation, request, httpClient, stencilClient,
+                retryStatusCodeRange, requestLogStatusCodeRanges);
+        httpSink.prepare(messages);
+        httpSink.execute();
+        verify(instrumentation, times(1)).logDebug("Response Body: [{\"key\":\"value1\"},{\"key\":\"value2\"}]");
     }
 }
