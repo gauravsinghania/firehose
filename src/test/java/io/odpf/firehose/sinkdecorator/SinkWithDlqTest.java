@@ -7,6 +7,7 @@ import io.odpf.firehose.error.ErrorType;
 import io.odpf.firehose.consumer.Message;
 import io.odpf.firehose.error.ErrorHandler;
 import io.odpf.firehose.metrics.Instrumentation;
+import io.odpf.firehose.metrics.Metrics;
 import io.odpf.firehose.sinkdecorator.dlq.DlqWriter;
 import org.aeonbits.owner.ConfigFactory;
 import org.hamcrest.Matchers;
@@ -22,6 +23,8 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 
+import static io.odpf.firehose.metrics.Metrics.DLQ_MESSAGES_TOTAL;
+import static io.odpf.firehose.metrics.Metrics.DLQ_RETRY_TOTAL;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -53,8 +56,8 @@ public class SinkWithDlqTest {
     @Before
     public void setup() {
         initMocks(this);
-        when(dlqConfig.getDlqMaxRetryAttempts()).thenReturn(10);
-        when(dlqConfig.getDlqFailOnMaxRetryAttemptsExceeded()).thenReturn(true);
+        when(dlqConfig.getDlqRetryMaxAttempts()).thenReturn(10);
+        when(dlqConfig.getDlqRetryFailAfterMaxAttemptEnable()).thenReturn(true);
         errorHandler = new ErrorHandler(ConfigFactory.create(ErrorConfig.class, new HashMap<String, String>() {{
             put("ERROR_TYPES_FOR_DLQ", ErrorType.DESERIALIZATION_ERROR.name());
         }}));
@@ -74,6 +77,10 @@ public class SinkWithDlqTest {
         List<Message> pushResult = sinkWithDlq.pushMessage(messages);
         verify(dlqWriter, times(1)).write(messages);
         assertEquals(0, pushResult.size());
+        verify(instrumentation, times(2)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.TOTAL, ErrorType.DESERIALIZATION_ERROR, 1);
+        verify(instrumentation, times(1)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.SUCCESS, 2);
+        verify(instrumentation, times(1)).incrementCounter(DLQ_RETRY_TOTAL);
+        verify(instrumentation, times(1)).captureGlobalMessageMetrics(Metrics.MessageScope.DLQ, 2);
     }
 
     @Test
@@ -121,15 +128,18 @@ public class SinkWithDlqTest {
 
         verify(dlqWriter, times(1)).write(messages);
         verify(dlqWriter, times(1)).write(dlqRetryMessages);
-        verify(instrumentation, times(2)).captureRetryAttempts();
-        verify(instrumentation, times(2)).incrementMessageSucceedCount();
-        verify(instrumentation, times(1)).incrementMessageFailCount(any(), any());
+        verify(instrumentation, times(1)).captureDLQErrors(any(), any());
+
+        verify(instrumentation, times(2)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.TOTAL, ErrorType.DESERIALIZATION_ERROR, 1);
+        verify(instrumentation, times(1)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.SUCCESS, 2);
+        verify(instrumentation, times(2)).incrementCounter(DLQ_RETRY_TOTAL);
+        verify(instrumentation, times(1)).captureGlobalMessageMetrics(Metrics.MessageScope.DLQ, 2);
     }
 
     @Test(expected = IOException.class)
     public void shouldThrowIOExceptionWhenExceedMaxRetryAttemptsButButHasFailedToBeDlqProcessedMessages() throws IOException {
         int currentMaxRetryAttempts = 5;
-        when(dlqConfig.getDlqMaxRetryAttempts()).thenReturn(currentMaxRetryAttempts);
+        when(dlqConfig.getDlqRetryMaxAttempts()).thenReturn(currentMaxRetryAttempts);
         Message messageWithError = new Message(this.message, new ErrorInfo(new IOException(), ErrorType.DESERIALIZATION_ERROR));
         ArrayList<Message> messages = new ArrayList<>();
         messages.add(messageWithError);
@@ -153,8 +163,8 @@ public class SinkWithDlqTest {
 
     @Test
     public void shouldNotThrowIOExceptionWhenFailOnMaxRetryAttemptDisabled() throws IOException {
-        when(dlqConfig.getDlqMaxRetryAttempts()).thenReturn(2);
-        when(dlqConfig.getDlqFailOnMaxRetryAttemptsExceeded()).thenReturn(false);
+        when(dlqConfig.getDlqRetryMaxAttempts()).thenReturn(2);
+        when(dlqConfig.getDlqRetryFailAfterMaxAttemptEnable()).thenReturn(false);
         Message messageWithError = new Message(message, new ErrorInfo(new IOException(), ErrorType.SINK_UNKNOWN_ERROR));
         ArrayList<Message> messages = new ArrayList<>();
         messages.add(messageWithError);
@@ -233,5 +243,27 @@ public class SinkWithDlqTest {
         assertEquals(1, argumentCaptor.getValue().size());
         assertThat(argumentCaptor.getValue(), Matchers.contains(messageWithError));
         assertEquals(1, pushResult.size());
+    }
+
+    @Test
+    public void shouldInstrumentFailure() throws Exception {
+        ArrayList<Message> messages = new ArrayList<>();
+        messages.add(message);
+        messages.add(message);
+        when(dlqConfig.getDlqRetryFailAfterMaxAttemptEnable()).thenReturn(false);
+        when(message.getErrorInfo()).thenReturn(new ErrorInfo(new RuntimeException(), ErrorType.DESERIALIZATION_ERROR));
+        when(sinkWithRetry.pushMessage(anyList())).thenReturn(messages);
+        when(dlqWriter.write(anyList())).thenReturn(messages);
+
+        SinkWithDlq sinkWithDlq = new SinkWithDlq(sinkWithRetry, dlqWriter, backOffProvider, dlqConfig, errorHandler, instrumentation);
+
+        List<Message> pushResult = sinkWithDlq.pushMessage(messages);
+        verify(dlqWriter, times(10)).write(messages);
+        assertEquals(2, pushResult.size());
+        verify(instrumentation, times(2)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.TOTAL, ErrorType.DESERIALIZATION_ERROR, 1);
+        verify(instrumentation, times(1)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.SUCCESS, 0);
+        verify(instrumentation, times(2)).captureMessageMetrics(DLQ_MESSAGES_TOTAL, Metrics.MessageType.FAILURE, ErrorType.DESERIALIZATION_ERROR, 1);
+        verify(instrumentation, times(10)).incrementCounter(DLQ_RETRY_TOTAL);
+        verify(instrumentation, times(1)).captureGlobalMessageMetrics(Metrics.MessageScope.DLQ, 0);
     }
 }

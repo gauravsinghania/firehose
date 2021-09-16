@@ -1,7 +1,6 @@
 package io.odpf.firehose.sink.objectstorage;
 
 import com.gojek.de.stencil.client.StencilClient;
-import com.gojek.de.stencil.parser.ProtoParser;
 import com.google.protobuf.Descriptors;
 import io.odpf.firehose.config.ObjectStorageSinkConfig;
 import io.odpf.firehose.metrics.Instrumentation;
@@ -9,17 +8,16 @@ import io.odpf.firehose.metrics.StatsDReporter;
 import io.odpf.firehose.objectstorage.ObjectStorage;
 import io.odpf.firehose.objectstorage.ObjectStorageFactory;
 import io.odpf.firehose.objectstorage.ObjectStorageType;
-import io.odpf.firehose.objectstorage.gcs.GCSConfig;
 import io.odpf.firehose.sink.Sink;
 import io.odpf.firehose.sink.SinkFactory;
-import io.odpf.firehose.sink.objectstorage.message.KafkaMetadataUtils;
 import io.odpf.firehose.sink.objectstorage.message.MessageDeSerializer;
 import io.odpf.firehose.sink.objectstorage.proto.KafkaMetadataProto;
 import io.odpf.firehose.sink.objectstorage.proto.KafkaMetadataProtoFile;
 import io.odpf.firehose.sink.objectstorage.proto.NestedKafkaMetadataProto;
 import io.odpf.firehose.sink.objectstorage.writer.WriterOrchestrator;
 import io.odpf.firehose.sink.objectstorage.writer.local.LocalStorage;
-import io.odpf.firehose.sink.objectstorage.writer.local.TimePartitionPath;
+import io.odpf.firehose.sink.objectstorage.writer.local.PartitionConfig;
+import io.odpf.firehose.sink.objectstorage.writer.local.PartitionFactory;
 import io.odpf.firehose.sink.objectstorage.writer.local.policy.SizeBasedRotatingPolicy;
 import io.odpf.firehose.sink.objectstorage.writer.local.policy.TimeBasedRotatingPolicy;
 import io.odpf.firehose.sink.objectstorage.writer.local.policy.WriterPolicy;
@@ -28,6 +26,7 @@ import org.aeonbits.owner.ConfigFactory;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,14 +36,12 @@ public class ObjectStorageSinkFactory implements SinkFactory {
     public Sink create(Map<String, String> configuration, StatsDReporter statsDReporter, StencilClient stencilClient) {
         ObjectStorageSinkConfig sinkConfig = ConfigFactory.create(ObjectStorageSinkConfig.class, configuration);
 
-        Instrumentation instrumentation = new Instrumentation(statsDReporter, ObjectStorageSinkFactory.class);
+        LocalStorage localStorage = getLocalFileWriterWrapper(sinkConfig, stencilClient, statsDReporter);
 
-        LocalStorage localStorage = getLocalFileWriterWrapper(sinkConfig, stencilClient);
+        ObjectStorage sinkObjectStorage = createSinkObjectStorage(sinkConfig, new HashMap<>(configuration));
 
-        ObjectStorage sinkObjectStorage = createSinkObjectStorage(sinkConfig);
-
-        WriterOrchestrator writerOrchestrator = new WriterOrchestrator(localStorage, sinkObjectStorage);
-        MessageDeSerializer messageDeSerializer = getMessageDeSerializer(sinkConfig, stencilClient);
+        WriterOrchestrator writerOrchestrator = new WriterOrchestrator(localStorage, sinkObjectStorage, statsDReporter);
+        MessageDeSerializer messageDeSerializer = new MessageDeSerializer(sinkConfig, stencilClient);
 
         return new ObjectStorageSink(new Instrumentation(statsDReporter, ObjectStorageSink.class), sinkConfig.getSinkType().toString(), writerOrchestrator, messageDeSerializer);
     }
@@ -57,27 +54,22 @@ public class ObjectStorageSinkFactory implements SinkFactory {
 
     }
 
-    private MessageDeSerializer getMessageDeSerializer(ObjectStorageSinkConfig sinkConfig, StencilClient stencilClient) {
-        ProtoParser protoParser = new ProtoParser(stencilClient, sinkConfig.getInputSchemaProtoClass());
-        KafkaMetadataUtils kafkaMetadataUtils = new KafkaMetadataUtils(sinkConfig.getKafkaMetadataColumnName());
-        return new MessageDeSerializer(kafkaMetadataUtils, sinkConfig.getWriteKafkaMetadata(), protoParser);
-    }
-
-    private LocalStorage getLocalFileWriterWrapper(ObjectStorageSinkConfig sinkConfig, StencilClient stencilClient) {
+    private LocalStorage getLocalFileWriterWrapper(ObjectStorageSinkConfig sinkConfig, StencilClient stencilClient, StatsDReporter statsDReporter) {
         Descriptors.Descriptor outputMessageDescriptor = stencilClient.get(sinkConfig.getInputSchemaProtoClass());
         Descriptors.Descriptor metadataMessageDescriptor = getMetadataMessageDescriptor(sinkConfig);
 
-        TimePartitionPath timePartitionPath = new TimePartitionPath(
+        PartitionFactory partitionFactory = new PartitionFactory(
                 sinkConfig.getKafkaMetadataColumnName(),
                 sinkConfig.getTimePartitioningFieldName(),
-                sinkConfig.getPartitioningType(),
-                sinkConfig.getTimePartitioningTimeZone(),
-                sinkConfig.getTimePartitioningDatePrefix(),
-                sinkConfig.getTimePartitioningHourPrefix());
+                new PartitionConfig(
+                        sinkConfig.getTimePartitioningTimeZone(),
+                        sinkConfig.getPartitioningType(),
+                        sinkConfig.getTimePartitioningDatePrefix(),
+                        sinkConfig.getTimePartitioningHourPrefix()));
 
 
         List<WriterPolicy> writerPolicies = new ArrayList<>();
-        writerPolicies.add(new TimeBasedRotatingPolicy(sinkConfig.getFileRotationDurationMillis()));
+        writerPolicies.add(new TimeBasedRotatingPolicy(sinkConfig.getFileRotationDurationMS()));
         writerPolicies.add(new SizeBasedRotatingPolicy(sinkConfig.getFileRotationMaxSizeBytes()));
 
         Path localBasePath = Paths.get(sinkConfig.getLocalDirectory());
@@ -90,17 +82,14 @@ public class ObjectStorageSinkFactory implements SinkFactory {
                 metadataMessageDescriptor.getFields(),
                 localBasePath,
                 writerPolicies,
-                timePartitionPath);
+                partitionFactory,
+                new Instrumentation(statsDReporter, LocalStorage.class));
     }
 
-    public ObjectStorage createSinkObjectStorage(ObjectStorageSinkConfig sinkConfig) {
+    public ObjectStorage createSinkObjectStorage(ObjectStorageSinkConfig sinkConfig, Map<String, String> configuration) {
         if (sinkConfig.getObjectStorageType() == ObjectStorageType.GCS) {
-            GCSConfig gcsConfig = new GCSConfig(
-                    Paths.get(sinkConfig.getLocalDirectory()),
-                    sinkConfig.getGCSBucketName(),
-                    sinkConfig.getGCSCredentialPath(),
-                    sinkConfig.getGCloudProjectID());
-            return ObjectStorageFactory.createObjectStorage(sinkConfig.getObjectStorageType(), gcsConfig.getProperties());
+            configuration.put("GCS_TYPE", "SINK_OBJECT_STORAGE");
+            return ObjectStorageFactory.createObjectStorage(sinkConfig.getObjectStorageType(), configuration);
         }
         throw new IllegalArgumentException("Sink Object Storage type " + sinkConfig.getObjectStorageType() + "is not supported");
     }

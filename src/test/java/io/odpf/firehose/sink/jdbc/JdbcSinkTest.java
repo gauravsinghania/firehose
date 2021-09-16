@@ -1,9 +1,10 @@
 package io.odpf.firehose.sink.jdbc;
 
-import com.gojek.de.stencil.client.StencilClient;
+
 import io.odpf.firehose.consumer.Message;
 import io.odpf.firehose.exception.DeserializerException;
 import io.odpf.firehose.metrics.Instrumentation;
+import com.gojek.de.stencil.client.StencilClient;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -66,7 +67,7 @@ public class JdbcSinkTest {
         jdbcSink.pushMessage(messages);
 
         verify(instrumentation, times(1)).startExecution();
-        verify(instrumentation, times(1)).captureSuccessExecutionTelemetry("db", messages.size());
+        verify(instrumentation, times(1)).captureSinkExecutionTelemetry("db", messages.size());
     }
 
     @Test
@@ -76,10 +77,10 @@ public class JdbcSinkTest {
         jdbcSink.pushMessage(messages);
 
         verify(instrumentation, times(1)).startExecution();
-        verify(instrumentation, times(1)).captureSuccessExecutionTelemetry("db", messages.size());
+        verify(instrumentation, times(1)).captureSinkExecutionTelemetry("db", messages.size());
         InOrder inOrder = inOrder(instrumentation);
         inOrder.verify(instrumentation).startExecution();
-        inOrder.verify(instrumentation).captureSuccessExecutionTelemetry("db", messages.size());
+        inOrder.verify(instrumentation).captureSinkExecutionTelemetry("db", messages.size());
     }
 
     @Test
@@ -88,18 +89,7 @@ public class JdbcSinkTest {
                 new Message(new byte[0], new byte[0], "topic", 0, 100));
 
         assertEquals(jdbcSink.pushMessage(messages).size(), 0);
-        verify(instrumentation, times(1)).captureSuccessExecutionTelemetry("db", messages.size());
-    }
-
-    @Test
-    public void shouldReturnFailedMessagesWhenExecuteThrowsException() throws SQLException, IOException, DeserializerException {
-        SQLException sqlException = new SQLException();
-        when(connection.createStatement()).thenThrow(sqlException);
-        List<Message> messages = Arrays.asList(new Message(new byte[0], new byte[0], "topic", 0, 100),
-                new Message(new byte[0], new byte[0], "topic", 0, 100));
-
-        assertEquals(jdbcSink.pushMessage(messages).size(), 2);
-        verify(instrumentation, times(1)).captureFailedExecutionTelemetry(sqlException, messages.size());
+        verify(instrumentation, times(1)).captureSinkExecutionTelemetry("db", messages.size());
     }
 
     @Test

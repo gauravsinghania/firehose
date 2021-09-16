@@ -45,11 +45,12 @@ In case push fails and DLQ \(Dead Letter Queue\) is:
 
 ## Which Kafka Client configs are available ?
 
-Firehose provides various Kafka client configurations. Refer [Generic Configurations](configuration.md#generic) section for details on configuration related to Kafka Consumer.
+Firehose provides various Kafka client configurations. Refer [Generic Configurations](configuration/#generic) section for details on configuration related to Kafka Consumer.
 
 ## What all data formats are supported ?
 
-Only Protobuf is supported by the Stencil client, the schema registry used by Firehose. Nevertheless, support for JSON and Avro is planned to be included in a future Firehose release.
+Elasticsearch and MongoDB sink support both JSON and Protobuf as the input schema.
+For other sinks, we currently support only Protobuf. Support for JSON and Avro is planned and incorporated in our roadmap. Please refer to our Roadmap section for more details.
 
 Protocol buffers are Google's language-neutral, platform-neutral, extensible mechanism for serializing structured data. Data streams on Kafka topics are bound to a Protobuf schema.
 
@@ -120,7 +121,7 @@ Firehose will send all the fields of the incoming messages to the specified sink
 
 ## How can I  handle consumer lag ?
 
-* When it comes to decreasing the topic lag, it often helps to have the environment variable - [`SOURCE_KAFKA_CONSUMER_CONFIG_MAX_POLL_RECORDS`](configuration.md#source_kafka_consumer_config_max_poll_records) to be increased from the default of 500 to something higher which will tell the Kafka Consumer to consume more messages in a single poll.
+* When it comes to decreasing the topic lag, it often helps to have the environment variable - [`SOURCE_KAFKA_CONSUMER_CONFIG_MAX_POLL_RECORDS`](configuration/#source_kafka_consumer_config_max_poll_records) to be increased from the default of 500 to something higher which will tell the Kafka Consumer to consume more messages in a single poll.
 * Additionally, you can increase the workers in the Firehose which will effectively multiply the number of records being processed by Firehose. 
 * Alternatively, if your underlying sink is not able to handle increased \(or default\) volume of data being pushed to it, adding some sort of a filter condition in the Firehose to ignore unnecessary messages in the topic would help you bring down the volume of data being processed by the sink.
 
@@ -146,8 +147,9 @@ No, all fields from the input key/message will be sent by Firehose to the Sink. 
 
 Protocol buffers are Google's language-neutral, platform-neutral, extensible mechanism for serializing structured data. Data streams on Kafka topics are bound to a Protobuf schema. Protobuf is much more lightweight that other schema formats like JSON, since it encodes the keys in the message to integers.
 
-Firehose uses the Stencil client which doesn't support any other schema format other than Protobuf. Nevertheless, support for JSON and Avro is planned to be included in a future Firehose release. Do follow the Roadmap section to know about future support for other schema formats
+Elasticsearch and MongoDB sink support both JSON and Protobuf as the input schema.
 
+For other sinks, we currently support only Protobuf. Support for JSON and Avro is planned and incorporated in our roadmap. Please refer to our Roadmap section for more details.
 ## Will I have any data loss if my Firehose fails ?
 
 After a batch of messages is sent successfully, Firehose commits the offset before the consumer polls another batch from Kafka. Thus, failed messages are not committed.

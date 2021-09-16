@@ -14,6 +14,7 @@ import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableInfo;
 import com.google.cloud.bigquery.TimePartitioning;
 import io.odpf.firehose.config.BigQuerySinkConfig;
+import io.odpf.firehose.metrics.Instrumentation;
 import io.odpf.firehose.sink.bigquery.models.Constants;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -42,15 +43,18 @@ public class BQClientTest {
     private TimePartitioning mockTimePartitioning;
     private BigQueryClient bqClient;
 
+    @Mock
+    private Instrumentation instrumentation;
+
     @Test
     public void shouldIgnoreExceptionIfDatasetAlreadyExists() {
         when(bqConfig.isTablePartitioningEnabled()).thenReturn(true);
         when(bqConfig.getTablePartitionKey()).thenReturn("partition_column");
-        when(bqConfig.getBigQueryTablePartitionExpiryMillis()).thenReturn(-1L);
+        when(bqConfig.getBigQueryTablePartitionExpiryMS()).thenReturn(-1L);
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -82,11 +86,11 @@ public class BQClientTest {
     public void shouldCreateBigqueryTableWithPartition() {
         when(bqConfig.isTablePartitioningEnabled()).thenReturn(true);
         when(bqConfig.getTablePartitionKey()).thenReturn("partition_column");
-        when(bqConfig.getBigQueryTablePartitionExpiryMillis()).thenReturn(-1L);
+        when(bqConfig.getBigQueryTablePartitionExpiryMS()).thenReturn(-1L);
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -118,7 +122,7 @@ public class BQClientTest {
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -153,7 +157,7 @@ public class BQClientTest {
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -190,7 +194,7 @@ public class BQClientTest {
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -229,10 +233,10 @@ public class BQClientTest {
         when(bqConfig.isTablePartitioningEnabled()).thenReturn(true);
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
-        when(bqConfig.getBigQueryTablePartitionExpiryMillis()).thenReturn(partitionExpiry);
+        when(bqConfig.getBigQueryTablePartitionExpiryMS()).thenReturn(partitionExpiry);
         when(bqConfig.getTablePartitionKey()).thenReturn("partition_column");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("US");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -298,18 +302,18 @@ public class BQClientTest {
         when(mockTableDefinition.getSchema()).thenReturn(tableDefinition.getSchema());
         when(bigquery.update(tableInfo)).thenThrow(new BigQueryException(404, "Failed to update"));
 
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
         bqClient.upsertTable(updatedBQSchemaFields);
     }
 
     @Test(expected = RuntimeException.class)
     public void shouldThrowExceptionIfDatasetLocationIsChanged() {
         when(bqConfig.isTablePartitioningEnabled()).thenReturn(false);
-        when(bqConfig.getBigQueryTablePartitionExpiryMillis()).thenReturn(-1L);
+        when(bqConfig.getBigQueryTablePartitionExpiryMS()).thenReturn(-1L);
         when(bqConfig.getTableName()).thenReturn("bq-table");
         when(bqConfig.getDatasetName()).thenReturn("bq-proto");
         when(bqConfig.getBigQueryDatasetLocation()).thenReturn("new-location");
-        bqClient = new BigQueryClient(bigquery, bqConfig);
+        bqClient = new BigQueryClient(bigquery, bqConfig, instrumentation);
 
         ArrayList<Field> bqSchemaFields = new ArrayList<Field>() {{
             add(Field.newBuilder("test-1", LegacySQLTypeName.INTEGER).setMode(Field.Mode.NULLABLE).build());
@@ -339,8 +343,8 @@ public class BQClientTest {
         timePartitioningBuilder.setField(bqConfig.getTablePartitionKey())
                 .setRequirePartitionFilter(true);
 
-        if (bqConfig.getBigQueryTablePartitionExpiryMillis() > 0) {
-            timePartitioningBuilder.setExpirationMs(bqConfig.getBigQueryTablePartitionExpiryMillis());
+        if (bqConfig.getBigQueryTablePartitionExpiryMS() > 0) {
+            timePartitioningBuilder.setExpirationMs(bqConfig.getBigQueryTablePartitionExpiryMS());
         }
 
         Schema schema = Schema.of(bqSchemaFields);

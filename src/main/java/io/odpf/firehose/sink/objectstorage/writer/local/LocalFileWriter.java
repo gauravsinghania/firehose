@@ -8,9 +8,16 @@ import java.io.IOException;
 public interface LocalFileWriter extends Closeable {
     long currentSize();
 
-    void write(Record record) throws IOException;
+    /**
+     * @param record to write
+     * @return true if write succeeds, false if the writer is closed.
+     * @throws IOException if local file writing fails
+     */
+    boolean write(Record record) throws IOException;
 
     long getCreatedTimestampMillis();
 
     String getFullPath();
+
+    Long getRecordCount();
 }

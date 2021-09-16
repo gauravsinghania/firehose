@@ -1,8 +1,8 @@
 package io.odpf.firehose.sink.influxdb;
 
-import com.gojek.de.stencil.StencilClientFactory;
-import com.gojek.de.stencil.client.StencilClient;
-import com.gojek.de.stencil.parser.ProtoParser;
+
+
+
 import io.odpf.firehose.config.InfluxSinkConfig;
 import io.odpf.firehose.consumer.Message;
 import io.odpf.firehose.consumer.TestBookingLogMessage;
@@ -13,6 +13,9 @@ import io.odpf.firehose.metrics.Instrumentation;
 import io.odpf.firehose.sink.Sink;
 import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.Timestamp;
+import com.gojek.de.stencil.StencilClientFactory;
+import com.gojek.de.stencil.client.StencilClient;
+import com.gojek.de.stencil.parser.ProtoParser;
 import org.aeonbits.owner.ConfigFactory;
 import org.influxdb.InfluxDB;
 import org.influxdb.dto.BatchPoints;
@@ -135,23 +138,6 @@ public class InfluxSinkTest {
             assertEquals(InfluxSink.FIELD_NAME_MAPPING_ERROR_MESSAGE, e.getMessage());
         }
     }
-
-    @Test
-    public void shouldCaptureFailedExecutionTelemetryIncaseOfExceptions() throws DeserializerException, IOException {
-        expectedPoint = pointBuilder.tag("driver_id", driverId).build();
-        setupFieldNameIndexMappingProperties();
-        setupTagNameIndexMappingProperties();
-        config = ConfigFactory.create(InfluxSinkConfig.class, props);
-        sink = new InfluxSink(instrumentation, "influx", config, new ProtoParser(stencilClient, config.getInputSchemaProtoClass()), client, stencilClient);
-
-        RuntimeException runtimeException = new RuntimeException();
-        doThrow(runtimeException).when(instrumentation).startExecution();
-
-        sink.pushMessage(messages);
-
-        verify(instrumentation, times(1)).captureFailedExecutionTelemetry(runtimeException, messages.size());
-    }
-
 
     @Test
     public void shouldPushMessagesWithType() throws DeserializerException, IOException {

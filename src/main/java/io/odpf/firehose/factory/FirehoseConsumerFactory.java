@@ -29,6 +29,7 @@ import io.odpf.firehose.sink.influxdb.InfluxSinkFactory;
 import io.odpf.firehose.sink.jdbc.JdbcSinkFactory;
 import io.odpf.firehose.sink.log.KeyOrMessageParser;
 import io.odpf.firehose.sink.log.LogSinkFactory;
+import io.odpf.firehose.sink.mongodb.MongoSinkFactory;
 import io.odpf.firehose.sink.objectstorage.ObjectStorageSinkFactory;
 import io.odpf.firehose.sink.prometheus.PromSinkFactory;
 import io.odpf.firehose.sink.redis.RedisSinkFactory;
@@ -36,6 +37,7 @@ import io.odpf.firehose.sinkdecorator.BackOff;
 import io.odpf.firehose.sinkdecorator.BackOffProvider;
 import io.odpf.firehose.error.ErrorHandler;
 import io.odpf.firehose.sinkdecorator.ExponentialBackOffProvider;
+import io.odpf.firehose.sinkdecorator.SinkFinal;
 import io.odpf.firehose.sinkdecorator.SinkWithDlq;
 import io.odpf.firehose.sinkdecorator.SinkWithFailHandler;
 import io.odpf.firehose.sinkdecorator.SinkWithRetry;
@@ -49,6 +51,7 @@ import org.aeonbits.owner.ConfigFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
@@ -79,8 +82,8 @@ public class FirehoseConsumerFactory {
         instrumentation = new Instrumentation(this.statsDReporter, FirehoseConsumerFactory.class);
 
         String additionalConsumerConfig = String.format(""
-                                                        + "\n\tEnable Async Commit: %s"
-                                                        + "\n\tCommit Only Current Partition: %s",
+                        + "\n\tEnable Async Commit: %s"
+                        + "\n\tCommit Only Current Partition: %s",
                 this.kafkaConsumerConfig.isSourceKafkaAsyncCommitEnable(),
                 this.kafkaConsumerConfig.isSourceKafkaCommitOnlyCurrentPartitionsEnable());
         instrumentation.logDebug(additionalConsumerConfig);
@@ -168,6 +171,8 @@ public class FirehoseConsumerFactory {
                 return new ObjectStorageSinkFactory().create(config, statsDReporter, stencilClient);
             case BIGQUERY:
                 return new BigQuerySinkFactory().create(config, statsDReporter, stencilClient);
+            case MONGODB:
+                return new MongoSinkFactory().create(config, statsDReporter, stencilClient);
             default:
                 throw new EglcConfigurationException("Invalid Firehose SINK_TYPE");
 
@@ -179,13 +184,14 @@ public class FirehoseConsumerFactory {
         Sink baseSink = getSink();
         Sink sinkWithFailHandler = new SinkWithFailHandler(baseSink, errorHandler);
         Sink sinkWithRetry = withRetry(sinkWithFailHandler, errorHandler);
-        return withDlq(sinkWithRetry, tracer, errorHandler);
+        Sink sinWithDLQ = withDlq(sinkWithRetry, tracer, errorHandler);
+        return new SinkFinal(sinWithDLQ, new Instrumentation(statsDReporter, SinkFinal.class));
     }
 
     public Sink withDlq(Sink sink, Tracer tracer, ErrorHandler errorHandler) {
         DlqConfig dlqConfig = ConfigFactory.create(DlqConfig.class, config);
         DlqWriterFactory dlqWriterFactory = new DlqWriterFactory();
-        DlqWriter dlqWriter = dlqWriterFactory.create(config, statsDReporter, tracer);
+        DlqWriter dlqWriter = dlqWriterFactory.create(new HashMap<>(config), statsDReporter, tracer);
         BackOffProvider backOffProvider = getBackOffProvider();
         return SinkWithDlq.withInstrumentationFactory(
                 sink,

@@ -5,9 +5,9 @@ import io.odpf.firehose.error.ErrorType;
 import io.odpf.firehose.consumer.Message;
 import io.odpf.firehose.consumer.offset.OffsetManager;
 import io.odpf.firehose.exception.DeserializerException;
+import io.odpf.firehose.exception.SinkException;
 import io.odpf.firehose.sink.exception.UnknownFieldsException;
 import io.odpf.firehose.sink.exception.EmptyMessageException;
-import io.odpf.firehose.exception.WriterIOException;
 import io.odpf.firehose.metrics.Instrumentation;
 import io.odpf.firehose.sink.AbstractSink;
 import io.odpf.firehose.sink.objectstorage.message.MessageDeSerializer;
@@ -38,30 +38,32 @@ public class ObjectStorageSink extends AbstractSink {
 
     @Override
     protected List<Message> execute() throws Exception {
-        List<Message> deserializationFailedMessages = new LinkedList<>();
+        List<Message> failedMessages = new LinkedList<>();
         for (Message message : messages) {
             try {
                 Record record = messageDeSerializer.deSerialize(message);
-                offsetManager.addOffsetToBatch(writerOrchestrator.write(record), message);
+                String filePath = writerOrchestrator.write(record);
+                offsetManager.addOffsetToBatch(filePath, message);
             } catch (EmptyMessageException e) {
                 getInstrumentation().logWarn("empty message found on topic: {}, partition: {}, offset: {}",
                         message.getTopic(), message.getPartition(), message.getOffset());
                 message.setErrorInfo(new ErrorInfo(e, ErrorType.INVALID_MESSAGE_ERROR));
-                deserializationFailedMessages.add(message);
+                failedMessages.add(message);
             } catch (UnknownFieldsException e) {
                 getInstrumentation().logWarn(e.getMessage());
                 message.setErrorInfo(new ErrorInfo(e, ErrorType.UNKNOWN_FIELDS_ERROR));
-                deserializationFailedMessages.add(message);
+                failedMessages.add(message);
             } catch (DeserializerException e) {
                 getInstrumentation().logWarn("message deserialization failed on topic: {}, partition: {}, offset: {}, reason: {}",
                         message.getTopic(), message.getPartition(), message.getOffset(), e.getMessage());
                 message.setErrorInfo(new ErrorInfo(e, ErrorType.DESERIALIZATION_ERROR));
-                deserializationFailedMessages.add(message);
+                failedMessages.add(message);
             } catch (Exception e) {
-                throw new WriterIOException(e);
+                throw new SinkException(e);
             }
         }
-        return deserializationFailedMessages;
+
+        return failedMessages;
     }
 
     @Override

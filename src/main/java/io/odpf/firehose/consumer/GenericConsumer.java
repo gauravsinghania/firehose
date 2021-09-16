@@ -5,6 +5,7 @@ import io.odpf.firehose.config.KafkaConsumerConfig;
 import io.odpf.firehose.filter.Filter;
 import io.odpf.firehose.filter.FilterException;
 import io.odpf.firehose.metrics.Instrumentation;
+import io.odpf.firehose.metrics.Metrics;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -60,6 +61,7 @@ public class GenericConsumer implements AutoCloseable {
         ConsumerRecords<byte[], byte[]> records = kafkaConsumer.poll(Duration.ofMillis(consumerConfig.getSourceKafkaPollTimeoutMs()));
         instrumentation.logInfo("Pulled {} messages", records.count());
         instrumentation.capturePulledMessageHistogram(records.count());
+        instrumentation.captureGlobalMessageMetrics(Metrics.MessageScope.CONSUMER, records.count());
         List<Message> messages = new ArrayList<>();
 
         for (ConsumerRecord<byte[], byte[]> record : records) {
@@ -74,6 +76,7 @@ public class GenericConsumer implements AutoCloseable {
         int filteredMessageCount = messages.size() - filteredMessage.size();
         if (filteredMessageCount > 0) {
             instrumentation.captureFilteredMessageCount(filteredMessageCount, consumerConfig.getFilterJexlExpression());
+            instrumentation.captureGlobalMessageMetrics(Metrics.MessageScope.FILTERED, filteredMessageCount);
         }
         return filteredMessage;
     }
@@ -92,9 +95,9 @@ public class GenericConsumer implements AutoCloseable {
         if (consumerConfig.isSourceKafkaAsyncCommitEnable()) {
             kafkaConsumer.commitAsync((offsets, exception) -> {
                 if (exception != null) {
-                    instrumentation.incrementCounterWithTags(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, FAILURE_TAG);
+                    instrumentation.incrementCounter(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, FAILURE_TAG);
                 } else {
-                    instrumentation.incrementCounterWithTags(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, SUCCESS_TAG);
+                    instrumentation.incrementCounter(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, SUCCESS_TAG);
                 }
             });
         } else {
@@ -108,7 +111,7 @@ public class GenericConsumer implements AutoCloseable {
                 offsets.entrySet()
                         .stream()
                         .filter(metadataEntry -> !committedOffsets.containsKey(metadataEntry.getKey())
-                                                 || metadataEntry.getValue().offset() > committedOffsets.get(metadataEntry.getKey()).offset())
+                                || metadataEntry.getValue().offset() > committedOffsets.get(metadataEntry.getKey()).offset())
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         if (latestOffsets.isEmpty()) {
             return;
@@ -129,9 +132,9 @@ public class GenericConsumer implements AutoCloseable {
 
     private void onComplete(Map<TopicPartition, OffsetAndMetadata> offsets, Exception exception) {
         if (exception != null) {
-            instrumentation.incrementCounterWithTags(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, FAILURE_TAG);
+            instrumentation.incrementCounter(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, FAILURE_TAG);
         } else {
-            instrumentation.incrementCounterWithTags(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, SUCCESS_TAG);
+            instrumentation.incrementCounter(SOURCE_KAFKA_MESSAGES_COMMIT_TOTAL, SUCCESS_TAG);
             committedOffsets.putAll(offsets);
         }
     }
